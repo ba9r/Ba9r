@@ -1,0 +1,425 @@
+-- Tải thư viện giao diện Rayfield (Dành cho Delta X)
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Delta X Menu",
+    LoadingTitle = "Delta X Executor",
+    LoadingSubtitle = "Aim System & Visuals",
+    ConfigurationSaving = { Enabled = false },
+    KeySystem = false
+})
+
+local AimTab = Window:CreateTab("ba9r", 4483362458)
+
+-- Biến trạng thái
+local aimPlayerEnabled = false
+local aimNpcEnabled = false 
+local espEnabled = false 
+local showFov = true
+local infiniteJumpEnabled = false
+local fovRadiusPlayer = 150
+local fovRadiusNpc = 200
+local savedPosition = nil
+
+-- ============ CẤU HÌNH TỐI ƯU ============
+local NPC_SCAN_INTERVAL = 3         -- Quét lại danh sách NPC mỗi 3 giây
+local RAYCAST_INTERVAL = 0.1        -- Kiểm tra vật cản mỗi 0.1 giây
+local MAX_RAYCAST_TARGETS = 5       -- Chỉ raycast tối đa 5 mục tiêu gần nhất
+local MAX_NPC_DISTANCE = 500        -- Bỏ qua NPC xa hơn 500 studs
+
+-- Bảng cache NPC
+local npcCache = {}
+local lastNpcScan = 0
+local lastRaycastTime = 0
+local raycastResultCache = {}
+
+-- FOV Circle Player (Rainbow)
+local fovCirclePlayer = Drawing.new("Circle")
+fovCirclePlayer.Thickness = 1.5
+fovCirclePlayer.NumSides = 60
+fovCirclePlayer.Filled = false
+fovCirclePlayer.Transparency = 1
+fovCirclePlayer.Visible = false
+
+-- FOV Circle NPC (Đỏ)
+local fovCircleNpc = Drawing.new("Circle")
+fovCircleNpc.Thickness = 1.5
+fovCircleNpc.NumSides = 60
+fovCircleNpc.Filled = false
+fovCircleNpc.Transparency = 1
+fovCircleNpc.Color = Color3.fromRGB(255, 0, 0)
+fovCircleNpc.Visible = false
+
+-- ESP Cache
+local espCache = {}
+
+local function createESP(player)
+    local esp = {}
+    esp.Box = Drawing.new("Square")
+    esp.Box.Thickness = 1
+    esp.Box.Color = Color3.fromRGB(255, 255, 255)
+    esp.Box.Filled = false
+    esp.Box.Transparency = 1
+    esp.Box.Visible = false
+    
+    esp.HealthBarBg = Drawing.new("Square")
+    esp.HealthBarBg.Filled = true
+    esp.HealthBarBg.Color = Color3.new(0, 0, 0)
+    esp.HealthBarBg.Transparency = 0.6
+    esp.HealthBarBg.Visible = false
+    
+    esp.HealthBar = Drawing.new("Square")
+    esp.HealthBar.Filled = true
+    esp.HealthBar.Color = Color3.new(0, 1, 0)
+    esp.HealthBar.Transparency = 1
+    esp.HealthBar.Visible = false
+    
+    espCache[player] = esp
+end
+
+local function isVisible(targetPart, camera)
+    local origin = camera.CFrame.Position
+    local direction = (targetPart.Position - origin)
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.FilterDescendantsInstances = {game.Players.LocalPlayer.Character, camera}
+    
+    local rayResult = workspace:Raycast(origin, direction, raycastParams)
+    
+    if rayResult then
+        if rayResult.Instance == targetPart or rayResult.Instance:IsDescendantOf(targetPart.Parent) then
+            return true
+        end
+    end
+    return false
+end
+
+-- ================= UI MENU =================
+
+AimTab:CreateToggle({
+    Name = "Aim", CurrentValue = false, Flag = "AimPlayerToggle",
+    Callback = function(Value) aimPlayerEnabled = Value end,
+})
+
+AimTab:CreateSlider({
+    Name = "FOV", Range = {10, 500}, Increment = 10, Suffix = "px", CurrentValue = 150,
+    Flag = "FOVPlayerSlider",
+    Callback = function(Value) fovRadiusPlayer = Value end,
+})
+
+AimTab:CreateToggle({
+    Name = "Aim NPC", CurrentValue = false, Flag = "AimNpcToggle",
+    Callback = function(Value) aimNpcEnabled = Value end,
+})
+
+AimTab:CreateSlider({
+    Name = "FOV NPC", Range = {10, 500}, Increment = 10, Suffix = "px", CurrentValue = 200,
+    Flag = "FOVNpcSlider",
+    Callback = function(Value) fovRadiusNpc = Value end,
+})
+
+AimTab:CreateToggle({
+    Name = "ESP", CurrentValue = false, Flag = "EspToggle",
+    Callback = function(Value) espEnabled = Value end,
+})
+
+AimTab:CreateToggle({
+    Name = "FOV", CurrentValue = true, Flag = "FovToggle",
+    Callback = function(Value) showFov = Value end,
+})
+
+AimTab:CreateToggle({
+    Name = "Infinite Jump", CurrentValue = false, Flag = "InfiniteJumpToggle",
+    Callback = function(Value) infiniteJumpEnabled = Value end,
+})
+
+AimTab:CreateButton({
+    Name = "Lưu Vị Chí",
+    Callback = function()
+        local char = game.Players.LocalPlayer.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            savedPosition = char.HumanoidRootPart.CFrame
+            Rayfield:Notify({Title = "Thông báo", Content = "Đã lưu vị trí!", Duration = 3, Image = 4483362458})
+        end
+    end,
+})
+
+AimTab:CreateButton({
+    Name = "Xóa Lưu Vị Chí",
+    Callback = function()
+        savedPosition = nil
+        Rayfield:Notify({Title = "Thông báo", Content = "Đã xóa vị trí!", Duration = 3, Image = 4483362458})
+    end,
+})
+
+AimTab:CreateButton({
+    Name = "Dịch Chuyển",
+    Callback = function()
+        if savedPosition then
+            local char = game.Players.LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                char.HumanoidRootPart.CFrame = savedPosition
+                Rayfield:Notify({Title = "Thông báo", Content = "Đã dịch chuyển!", Duration = 3, Image = 4483362458})
+            end
+        else
+            Rayfield:Notify({Title = "Lỗi", Content = "Chưa lưu vị trí!", Duration = 3, Image = 4483362458})
+        end
+    end,
+})
+
+game:GetService("UserInputService").JumpRequest:Connect(function()
+    if infiniteJumpEnabled then
+        local char = game.Players.LocalPlayer.Character
+        if char then
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end
+    end
+end)
+
+-- ================= CẬP NHẬT CACHE NPC (ĐÃ SỬA) =================
+local function updateNpcCache()
+    npcCache = {}
+    if not aimNpcEnabled then return end
+    
+    local localPlayer = game.Players.LocalPlayer
+    local localChar = localPlayer.Character
+    if not localChar or not localChar:FindFirstChild("HumanoidRootPart") then return end
+    
+    local myPos = localChar.HumanoidRootPart.Position
+    local seen = {}
+    
+    -- FIX: Dùng GetDescendants() để quét ĐẦY ĐỦ, không bỏ sót NPC ở thư mục tùy chỉnh
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and not seen[obj] then
+            local humanoid = obj:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                if not game.Players:GetPlayerFromCharacter(obj) and obj ~= localChar then
+                    local hrp = obj:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        -- Lọc theo khoảng cách để giảm số lượng raycast
+                        local dist = (hrp.Position - myPos).Magnitude
+                        if dist <= MAX_NPC_DISTANCE then
+                            local hasTarget = obj:FindFirstChild("Head") 
+                                            or obj:FindFirstChild("Torso") 
+                                            or obj:FindFirstChild("UpperTorso")
+                            if hasTarget then
+                                table.insert(npcCache, obj)
+                                seen[obj] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ================= HÀM QUÉT MỤC TIÊU (FIX BUG CACHE) =================
+local function findBestTarget(camera, centerScreen, localPlayer)
+    local candidates = {}
+    
+    if aimPlayerEnabled then
+        for _, player in ipairs(game.Players:GetPlayers()) do
+            if player ~= localPlayer and player.Character then
+                local head = player.Character:FindFirstChild("Head")
+                if head and head:IsA("BasePart") then
+                    local sp, onScreen = camera:WorldToViewportPoint(head.Position)
+                    if onScreen and sp.Z > 0 then
+                        local d2D = (Vector2.new(sp.X, sp.Y) - centerScreen).Magnitude
+                        if d2D <= fovRadiusPlayer then
+                            table.insert(candidates, {part = head, dist2D = d2D})
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    if aimNpcEnabled then
+        for _, npc in ipairs(npcCache) do
+            if npc and npc.Parent then
+                local targetPart = npc:FindFirstChild("Head") 
+                                or npc:FindFirstChild("Torso") 
+                                or npc:FindFirstChild("UpperTorso")
+                if targetPart and targetPart:IsA("BasePart") then
+                    local sp, onScreen = camera:WorldToViewportPoint(targetPart.Position)
+                    if onScreen and sp.Z > 0 then
+                        local d2D = (Vector2.new(sp.X, sp.Y) - centerScreen).Magnitude
+                        if d2D <= fovRadiusNpc then
+                            table.insert(candidates, {part = targetPart, dist2D = d2D})
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    if #candidates == 0 then return nil end
+    
+    table.sort(candidates, function(a, b) return a.dist2D < b.dist2D end)
+    
+    local currentTime = tick()
+    local shouldRaycast = (currentTime - lastRaycastTime) >= RAYCAST_INTERVAL
+    
+    -- FIX: Xóa cache TRƯỚC khi raycast, không phải sau
+    if shouldRaycast then
+        raycastResultCache = {}
+    end
+    
+    local maxCheck = math.min(#candidates, MAX_RAYCAST_TARGETS)
+    local bestTarget = nil
+    local bestDist = math.huge
+    
+    for i = 1, maxCheck do
+        local part = candidates[i].part
+        local visible
+        
+        -- Dùng cache nếu có, nếu không thì raycast
+        if raycastResultCache[part] ~= nil then
+            visible = raycastResultCache[part]
+        else
+            visible = isVisible(part, camera)
+            raycastResultCache[part] = visible
+        end
+        
+        if visible then
+            local dist3D = (camera.CFrame.Position - part.Position).Magnitude
+            if dist3D < bestDist then
+                bestDist = dist3D
+                bestTarget = part
+            end
+        end
+    end
+    
+    if shouldRaycast then
+        lastRaycastTime = currentTime
+    end
+    
+    return bestTarget
+end
+
+-- ================= VÒNG LẶP CHÍNH =================
+game:GetService("RunService").RenderStepped:Connect(function()
+    local camera = workspace.CurrentCamera
+    local localPlayer = game.Players.LocalPlayer
+    local centerScreen = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    
+    fovCirclePlayer.Position = centerScreen
+    fovCirclePlayer.Radius = fovRadiusPlayer
+    fovCirclePlayer.Visible = showFov and aimPlayerEnabled
+    local hue = (os.clock() * 0.5) % 1
+    fovCirclePlayer.Color = Color3.fromHSV(hue, 1, 1)
+
+    fovCircleNpc.Position = centerScreen
+    fovCircleNpc.Radius = fovRadiusNpc
+    fovCircleNpc.Visible = showFov and aimNpcEnabled
+
+    if aimNpcEnabled then
+        local currentTime = tick()
+        if currentTime - lastNpcScan >= NPC_SCAN_INTERVAL then
+            lastNpcScan = currentTime
+            -- Chạy updateNpcCache trong coroutine riêng để không block frame chính
+            coroutine.wrap(updateNpcCache)()
+        end
+    end
+
+    if aimPlayerEnabled or aimNpcEnabled then
+        local target = findBestTarget(camera, centerScreen, localPlayer)
+        if target then
+            camera.CFrame = CFrame.lookAt(camera.CFrame.Position, target.Position)
+        end
+    end
+
+    -- ESP (Giữ nguyên)
+    for _, player in ipairs(game.Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character then
+            local head = player.Character:FindFirstChild("Head")
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            
+            if head and humanoid and espEnabled then
+                local screenPoint, onScreen = camera:WorldToViewportPoint(head.Position)
+                
+                if onScreen and screenPoint.Z > 0 then
+                    if not espCache[player] then createESP(player) end
+                    local esp = espCache[player]
+                    
+                    local cf, size = player.Character:GetBoundingBox()
+                    local corners = {
+                        cf * Vector3.new(size.X/2, size.Y/2, size.Z/2),
+                        cf * Vector3.new(-size.X/2, size.Y/2, size.Z/2),
+                        cf * Vector3.new(size.X/2, -size.Y/2, size.Z/2),
+                        cf * Vector3.new(-size.X/2, -size.Y/2, size.Z/2),
+                        cf * Vector3.new(size.X/2, size.Y/2, -size.Z/2),
+                        cf * Vector3.new(-size.X/2, size.Y/2, -size.Z/2),
+                        cf * Vector3.new(size.X/2, -size.Y/2, -size.Z/2),
+                        cf * Vector3.new(-size.X/2, -size.Y/2, -size.Z/2)
+                    }
+                    
+                    local minX, minY = math.huge, math.huge
+                    local maxX, maxY = -math.huge, -math.huge
+                    local validBounds = false
+                    
+                    for _, corner in ipairs(corners) do
+                        local sc, osc = camera:WorldToViewportPoint(corner)
+                        if osc and sc.Z > 0 then
+                            validBounds = true
+                            if sc.X < minX then minX = sc.X end
+                            if sc.X > maxX then maxX = sc.X end
+                            if sc.Y < minY then minY = sc.Y end
+                            if sc.Y > maxY then maxY = sc.Y end
+                        end
+                    end
+                    
+                    if validBounds then
+                        local boxWidth = maxX - minX
+                        local boxHeight = maxY - minY
+                        
+                        esp.Box.Visible = true
+                        esp.Box.Position = Vector2.new(minX, minY)
+                        esp.Box.Size = Vector2.new(boxWidth, boxHeight)
+                        
+                        esp.HealthBarBg.Visible = true
+                        esp.HealthBar.Visible = true
+                        
+                        local barWidth = 4
+                        local barHeight = boxHeight
+                        local barX = minX - barWidth - 3
+                        local barY = minY
+                        
+                        esp.HealthBarBg.Size = Vector2.new(barWidth, barHeight)
+                        esp.HealthBarBg.Position = Vector2.new(barX, barY)
+                        
+                        local healthPercent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+                        local currentHealthHeight = barHeight * healthPercent
+                        local currentHealthY = barY + (barHeight - currentHealthHeight)
+                        
+                        esp.HealthBar.Size = Vector2.new(barWidth, currentHealthHeight)
+                        esp.HealthBar.Position = Vector2.new(barX, currentHealthY)
+                        
+                        if healthPercent > 0.5 then
+                            esp.HealthBar.Color = Color3.new(0, 1, 0)
+                        elseif healthPercent > 0.2 then
+                            esp.HealthBar.Color = Color3.new(1, 0.5, 0)
+                        else
+                            esp.HealthBar.Color = Color3.new(1, 0, 0)
+                        end
+                    end
+                else
+                    if espCache[player] then
+                        espCache[player].Box.Visible = false
+                        espCache[player].HealthBarBg.Visible = false
+                        espCache[player].HealthBar.Visible = false
+                    end
+                end
+            else
+                if espCache[player] then
+                    espCache[player].Box.Visible = false
+                    espCache[player].HealthBarBg.Visible = false
+                    espCache[player].HealthBar.Visible = false
+                end
+            end
+        end
+    end
+end)
