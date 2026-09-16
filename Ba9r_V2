@@ -1,0 +1,417 @@
+local R=loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local W=R:CreateWindow({Name="Delta X",LoadingTitle="DX",LoadingSubtitle="Menu",ConfigurationSaving={Enabled=false},KeySystem=false})
+local T=W:CreateTab("ba9r",4483362458)
+local UIS=game:GetService("UserInputService")
+local RUN=game:GetService("RunService")
+local LP=game:GetService("Players").LocalPlayer
+local WS=workspace
+local CAM=WS.CurrentCamera
+
+local aP,aN,eS,sF,iJ,gOn,hB,hN=false,false,false,true,false,false,false,false
+local fP,fN=150,200
+local sp=nil
+local nc,ec={},{}
+local lN=0
+local spd,spdOn=16,false
+local hbSize=10
+local hbTrans=0.5
+local hbSizeN=10
+local hbTransN=0.5
+local ghostModel=nil
+local renderLoop=nil
+local originalTransparencies={}
+local origHitboxData={}
+local origHitboxNPC={}
+
+local c1=Drawing.new("Circle")
+c1.Thickness=1.5;c1.NumSides=60;c1.Filled=false;c1.Visible=false
+local c2=Drawing.new("Circle")
+c2.Thickness=1.5;c2.NumSides=60;c2.Filled=false;c2.Color=Color3.new(1,0,0);c2.Visible=false
+local fT=Drawing.new("Text")
+fT.Size=20;fT.Color=Color3.new(0,1,0);fT.Outline=true;fT.Position=Vector2.new(20,40);fT.Visible=false
+
+local function getRootPart(char)
+return char and char:FindFirstChild("HumanoidRootPart")
+end
+local function clrE(p)
+if ec[p] then pcall(function() ec[p].B:Remove();ec[p].G:Remove();ec[p].H:Remove() end);ec[p]=nil end
+end
+local function clrAll()
+for p,_ in pairs(ec) do clrE(p) end
+end
+local function vis(p,cm)
+local rp=RaycastParams.new()
+rp.FilterType=Enum.RaycastFilterType.Exclude
+rp.FilterDescendantsInstances={LP.Character,cm}
+local r=WS:Raycast(cm.CFrame.Position,p.Position-cm.CFrame.Position,rp)
+return r and (r.Instance==p or r.Instance:IsDescendantOf(p.Parent)) or false
+end
+local function updN()
+nc={}
+if not (aN or hN) then return end
+local lc=LP.Character
+if not lc or not lc:FindFirstChild("HumanoidRootPart") then return end
+local mp=lc.HumanoidRootPart.Position
+for _,o in ipairs(WS:GetDescendants()) do
+if o:IsA("Model") then
+local h=o:FindFirstChildOfClass("Humanoid")
+if h and h.Health>0 and not game.Players:GetPlayerFromCharacter(o) and o~=lc then
+local hr=o:FindFirstChild("HumanoidRootPart")
+if hr and (hr.Position-mp).Magnitude<=400 then
+if o:FindFirstChild("Head") or o:FindFirstChild("Torso") or o:FindFirstChild("UpperTorso") then table.insert(nc,o) end
+end
+end
+end
+end
+end
+
+-- HITBOX NGƯỜI CHƠI (ĐỎ)
+local function applyHitbox(character)
+local hrp=character:FindFirstChild("HumanoidRootPart")
+if not hrp then return end
+if not origHitboxData[hrp] then
+origHitboxData[hrp]={Size=hrp.Size,Transparency=hrp.Transparency,Color=hrp.Color,Material=hrp.Material,CanCollide=hrp.CanCollide}
+end
+hrp.Size=Vector3.new(hbSize,hbSize,hbSize)
+hrp.Transparency=hbTrans
+hrp.Color=Color3.fromRGB(255,0,0)
+hrp.Material=Enum.Material.Neon
+hrp.CanCollide=false
+end
+local function removeHitbox(character)
+local hrp=character:FindFirstChild("HumanoidRootPart")
+if not hrp then return end
+local orig=origHitboxData[hrp]
+if orig then
+hrp.Size=orig.Size
+hrp.Transparency=orig.Transparency
+hrp.Color=orig.Color
+hrp.Material=orig.Material
+hrp.CanCollide=orig.CanCollide
+origHitboxData[hrp]=nil
+end
+end
+local function restoreAllHitbox()
+for _,p in ipairs(game.Players:GetPlayers()) do
+if p~=LP and p.Character then removeHitbox(p.Character) end
+end
+origHitboxData={}
+end
+
+-- HITBOX NPC (XANH LÁ)
+local function applyHitboxNPC(character)
+local hrp=character:FindFirstChild("HumanoidRootPart")
+if not hrp then
+hrp=character:FindFirstChild("Head") or character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+end
+if not hrp then return end
+if not origHitboxNPC[hrp] then
+origHitboxNPC[hrp]={Size=hrp.Size,Transparency=hrp.Transparency,Color=hrp.Color,Material=hrp.Material,CanCollide=hrp.CanCollide}
+end
+hrp.Size=Vector3.new(hbSizeN,hbSizeN,hbSizeN)
+hrp.Transparency=hbTransN
+hrp.Color=Color3.fromRGB(0,255,0)
+hrp.Material=Enum.Material.Neon
+hrp.CanCollide=false
+end
+local function removeHitboxNPC(character)
+local hrp=character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Head") or character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+if not hrp then return end
+local orig=origHitboxNPC[hrp]
+if orig then
+hrp.Size=orig.Size
+hrp.Transparency=orig.Transparency
+hrp.Color=orig.Color
+hrp.Material=orig.Material
+hrp.CanCollide=orig.CanCollide
+origHitboxNPC[hrp]=nil
+end
+end
+local function restoreAllHitboxNPC()
+for _,npc in ipairs(nc) do
+if npc and npc.Parent then removeHitboxNPC(npc) end
+end
+origHitboxNPC={}
+end
+
+T:CreateToggle({Name="Aim",CurrentValue=false,Callback=function(v)aP=v end})
+T:CreateSlider({Name="FOV",Range={10,500},Increment=10,Suffix="px",CurrentValue=150,Callback=function(v)fP=v end})
+T:CreateToggle({Name="Aim NPC",CurrentValue=false,Callback=function(v)aN=v end})
+T:CreateSlider({Name="FOV NPC",Range={10,500},Increment=10,Suffix="px",CurrentValue=200,Callback=function(v)fN=v end})
+T:CreateToggle({Name="ESP",CurrentValue=false,Callback=function(v) eS=v;if not eS then clrAll() end end})
+T:CreateToggle({Name="FOV",CurrentValue=true,Callback=function(v)sF=v end})
+T:CreateToggle({Name="Infinite Jump",CurrentValue=false,Callback=function(v)iJ=v end})
+
+-- HITBOX NGƯỜI
+T:CreateToggle({Name="Hitbox",CurrentValue=false,Callback=function(v)
+hB=v
+if not hB then restoreAllHitbox() end
+end})
+T:CreateSlider({Name="Hitbox Size",Range={1,30},Increment=1,Suffix="",CurrentValue=10,Callback=function(v) hbSize=v end})
+T:CreateSlider({Name="Hitbox Transparency",Range={0,1},Increment=0.05,Suffix="",CurrentValue=0.5,Callback=function(v) hbTrans=v end})
+
+-- HITBOX NPC (SIZE LÊN 200)
+T:CreateToggle({Name="Hitbox NPC",CurrentValue=false,Callback=function(v)
+hN=v
+if not hN then restoreAllHitboxNPC() end
+end})
+T:CreateSlider({Name="Hitbox NPC Size",Range={1,200},Increment=1,Suffix="",CurrentValue=10,Callback=function(v) hbSizeN=v end})
+T:CreateSlider({Name="Hitbox NPC Transparency",Range={0,1},Increment=0.05,Suffix="",CurrentValue=0.5,Callback=function(v) hbTransN=v end})
+
+-- HỒN MA
+T:CreateToggle({Name="Hồn Ma",CurrentValue=false,Callback=function(v)
+gOn=v
+local character=LP.Character
+if not character then return end
+local realRoot=getRootPart(character)
+local realHumanoid=character:FindFirstChildOfClass("Humanoid")
+if not realRoot or not realHumanoid then return end
+if gOn then
+character.Archivable=true
+ghostModel=character:Clone()
+ghostModel.Name="AxiomGhostModel"
+for _,obj in ipairs(ghostModel:GetDescendants()) do
+if obj:IsA("BasePart") then
+obj.Transparency=0.5
+if obj.Name=="HumanoidRootPart" then obj.CanCollide=false else obj.CanCollide=true end
+elseif obj:IsA("Decal") then
+obj.Transparency=0.5
+end
+end
+ghostModel.Parent=WS
+originalTransparencies={}
+for _,obj in ipairs(character:GetDescendants()) do
+if obj:IsA("BasePart") then
+originalTransparencies[obj]=obj.Transparency
+obj.Transparency=1
+elseif obj:IsA("Decal") then
+originalTransparencies[obj]=obj.Transparency
+obj.Transparency=1
+end
+end
+local ghostHumanoid=ghostModel:FindFirstChildOfClass("Humanoid")
+local ghostRoot=getRootPart(ghostModel)
+if ghostHumanoid and ghostRoot then
+ghostHumanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping,true)
+ghostHumanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall,true)
+CAM.CameraSubject=ghostHumanoid
+if renderLoop then renderLoop:Disconnect() end
+renderLoop=RUN.RenderStepped:Connect(function()
+if gOn and ghostModel and character then
+local voidLimit=WS.FallenPartsDestroyHeight or -500
+local targetY=voidLimit+5
+realRoot.CFrame=CFrame.new(ghostRoot.Position.X,targetY,ghostRoot.Position.Z)
+realRoot.Velocity=Vector3.new(0,0,0)
+ghostHumanoid:Move(realHumanoid.MoveDirection,false)
+ghostHumanoid.Jump=realHumanoid.Jump
+end
+end)
+end
+else
+if renderLoop then renderLoop:Disconnect();renderLoop=nil end
+if ghostModel then
+local ghostRoot=getRootPart(ghostModel)
+if ghostRoot then realRoot.CFrame=ghostRoot.CFrame+Vector3.new(0,2,0) end
+ghostModel:Destroy()
+ghostModel=nil
+end
+for obj,trans in pairs(originalTransparencies) do
+if obj and obj.Parent then obj.Transparency=trans end
+end
+originalTransparencies={}
+if realHumanoid then CAM.CameraSubject=realHumanoid end
+end
+end})
+
+T:CreateToggle({Name="Speed",CurrentValue=false,Callback=function(v)
+spdOn=v
+local c=LP.Character
+if c then local h=c:FindFirstChildOfClass("Humanoid");if h then h.WalkSpeed=spdOn and spd or 16 end end
+end})
+T:CreateSlider({Name="Speed Value",Range={16,200},Increment=1,Suffix="ws",CurrentValue=16,Callback=function(v)
+spd=v
+if spdOn then local c=LP.Character;if c then local h=c:FindFirstChildOfClass("Humanoid");if h then h.WalkSpeed=spd end end end
+end})
+T:CreateButton({Name="Lưu Vị Chí",Callback=function()
+local c=LP.Character
+if c and c:FindFirstChild("HumanoidRootPart") then sp=c.HumanoidRootPart.CFrame;R:Notify({Title="OK",Content="Đã lưu!",Duration=3}) end
+end})
+T:CreateButton({Name="Xóa Lưu Vị Chí",Callback=function() sp=nil;R:Notify({Title="OK",Content="Đã xóa!",Duration=3}) end})
+T:CreateButton({Name="Dịch Chuyển",Callback=function()
+if sp then local c=LP.Character;if c and c:FindFirstChild("HumanoidRootPart") then c.HumanoidRootPart.CFrame=sp;R:Notify({Title="OK",Content="Đã dịch chuyển!",Duration=3}) end
+else R:Notify({Title="Lỗi",Content="Chưa lưu!",Duration=3}) end
+end})
+T:CreateButton({Name="Bay Về Vị Chí",Callback=function()
+if not sp then R:Notify({Title="Lỗi",Content="Chưa lưu!",Duration=3}) return end
+local c=LP.Character
+if not c or not c:FindFirstChild("HumanoidRootPart") then return end
+local hr=c.HumanoidRootPart
+local hm=c:FindFirstChildOfClass("Humanoid")
+if not hm then return end
+task.spawn(function()
+hm:ChangeState(Enum.HumanoidStateType.Physics)
+local tp=sp.Position
+local st=0
+while st<500 do
+if not hr or not hr.Parent or not hm.Parent then break end
+if hm.Health<=0 then break end
+local cp=hr.Position
+local d=(tp-cp).Magnitude
+if d<=5 then hr.CFrame=CFrame.new(tp);break end
+local dir=(tp-cp).Unit
+local np=cp+dir*math.min(8,d)
+hr.CFrame=CFrame.new(np,np+dir)
+st=st+1
+task.wait(0.01)
+end
+task.wait(0.1)
+pcall(function() hm:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+R:Notify({Title="OK",Content="Tới đích!",Duration=3})
+end)
+end})
+local fOn=false
+T:CreateToggle({Name="Hiện FPS",CurrentValue=false,Callback=function(v) fOn=v;fT.Visible=v end})
+
+UIS.JumpRequest:Connect(function()
+if iJ then
+local c=LP.Character
+if c then local h=c:FindFirstChildOfClass("Humanoid");if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end end
+end
+end)
+game.Players.PlayerRemoving:Connect(function(p) clrE(p) end)
+
+local fc,lu=0,tick()
+RUN.RenderStepped:Connect(function()
+local cm=CAM
+local cs=Vector2.new(cm.ViewportSize.X/2,cm.ViewportSize.Y/2)
+
+if hB then
+for _,p in ipairs(game.Players:GetPlayers()) do
+if p~=LP and p.Character then
+local hum=p.Character:FindFirstChildOfClass("Humanoid")
+if hum and hum.Health>0 then applyHitbox(p.Character) end
+end
+end
+end
+
+if hN then
+for _,npc in ipairs(nc) do
+if npc and npc.Parent then
+local hum=npc:FindFirstChildOfClass("Humanoid")
+if hum and hum.Health>0 then applyHitboxNPC(npc) end
+end
+end
+end
+
+local mc2=LP.Character
+if mc2 then
+local mh=mc2:FindFirstChildOfClass("Humanoid")
+if mh then local ts=spdOn and spd or 16;if mh.WalkSpeed~=ts then mh.WalkSpeed=ts end end
+end
+if fOn then
+fc=fc+1
+local n=tick()
+if n-lu>=1 then fT.Text="FPS: "..math.floor(fc/(n-lu));fc,lu=0,n end
+end
+c1.Position=cs;c1.Radius=fP;c1.Visible=sF and aP
+if c1.Visible then c1.Color=Color3.fromHSV((os.clock()*0.5)%1,1,1) end
+c2.Position=cs;c2.Radius=fN;c2.Visible=sF and aN
+if (aN or hN) and tick()-lN>=5 then lN=tick();coroutine.wrap(updN)() end
+if aP or aN then
+local cd={}
+if aP then
+for _,p in ipairs(game.Players:GetPlayers()) do
+if p~=LP and p.Character then
+local h=p.Character:FindFirstChild("Head")
+if h then
+local s,o=cm:WorldToViewportPoint(h.Position)
+if o and s.Z>0 then local d=(Vector2.new(s.X,s.Y)-cs).Magnitude;if d<=fP then table.insert(cd,{p=h,d=d}) end end
+end
+end
+end
+end
+if aN then
+for _,n in ipairs(nc) do
+if n and n.Parent then
+local tp=n:FindFirstChild("Head") or n:FindFirstChild("Torso") or n:FindFirstChild("UpperTorso")
+if tp then
+local s,o=cm:WorldToViewportPoint(tp.Position)
+if o and s.Z>0 then local d=(Vector2.new(s.X,s.Y)-cs).Magnitude;if d<=fN then table.insert(cd,{p=tp,d=d}) end end
+end
+end
+end
+end
+if #cd>0 then
+table.sort(cd,function(a,b) return a.d<b.d end)
+local mc=math.min(#cd,3)
+local bt,bd=nil,math.huge
+for i=1,mc do if vis(cd[i].p,cm) then local d3=(cm.CFrame.Position-cd[i].p.Position).Magnitude;if d3<bd then bd=d3;bt=cd[i].p end end end
+if bt then cm.CFrame=CFrame.lookAt(cm.CFrame.Position,bt.Position) end
+end
+end
+end)
+
+task.spawn(function()
+while task.wait(0.05) do
+if not eS then if next(ec)~=nil then clrAll() end continue end
+local cm=CAM
+local vX,vY=cm.ViewportSize.X,cm.ViewportSize.Y
+local hue=(os.clock()*0.4)%1
+local rc=Color3.fromHSV(hue,1,1)
+for p,_ in pairs(ec) do if not p.Parent then clrE(p) end end
+for _,p in ipairs(game.Players:GetPlayers()) do
+if p~=LP and p.Character then
+local hd=p.Character:FindFirstChild("Head")
+local hm=p.Character:FindFirstChildOfClass("Humanoid")
+if not hd or not hm or hm.Health<=0 then clrE(p) else
+if not ec[p] then
+local e={}
+e.B=Drawing.new("Square");e.B.Thickness=1;e.B.Filled=false;e.B.Visible=false
+e.G=Drawing.new("Square");e.G.Filled=true;e.G.Color=Color3.new(0,0,0);e.G.Transparency=0.6;e.G.Visible=false
+e.H=Drawing.new("Square");e.H.Filled=true;e.H.Visible=false
+ec[p]=e
+end
+local e=ec[p]
+local sh=cm:WorldToViewportPoint(hd.Position)
+if sh.Z>0 then
+local cf,sz=p.Character:GetBoundingBox()
+local x1,y1,x2,y2=math.huge,math.huge,-math.huge,-math.huge
+local an=false
+for _,pt in ipairs({cf*Vector3.new(sz.X/2,sz.Y/2,sz.Z/2),cf*Vector3.new(-sz.X/2,sz.Y/2,sz.Z/2),cf*Vector3.new(sz.X/2,-sz.Y/2,sz.Z/2),cf*Vector3.new(-sz.X/2,-sz.Y/2,sz.Z/2),cf*Vector3.new(sz.X/2,sz.Y/2,-sz.Z/2),cf*Vector3.new(-sz.X/2,sz.Y/2,-sz.Z/2),cf*Vector3.new(sz.X/2,-sz.Y/2,-sz.Z/2),cf*Vector3.new(-sz.X/2,-sz.Y/2,-sz.Z/2)}) do
+local sc,os=cm:WorldToViewportPoint(pt)
+if sc.Z>0 then
+if os then an=true end
+if sc.X<x1 then x1=sc.X end
+if sc.X>x2 then x2=sc.X end
+if sc.Y<y1 then y1=sc.Y end
+if sc.Y>y2 then y2=sc.Y end
+end
+end
+if x1<math.huge then
+local bw=x2-x1
+local bh=y2-y1
+if not an then
+x1=math.clamp(x1,5,vX-5);y1=math.clamp(y1,5,vY-5)
+x2=math.clamp(x2,5,vX-5);y2=math.clamp(y2,5,vY-5)
+bw=x2-x1;bh=y2-y1
+if bw<30 then bw=30 end
+if bh<40 then bh=40 end
+if x1+bw>vX-5 then x1=vX-5-bw end
+if y1+bh>vY-5 then y1=vY-5-bh end
+end
+e.B.Visible=true;e.B.Position=Vector2.new(x1,y1);e.B.Size=Vector2.new(bw,bh);e.B.Color=rc
+e.G.Visible=true;e.H.Visible=true
+local barW=4
+local bx,by=x1-barW-3,y1
+e.G.Size=Vector2.new(barW,bh);e.G.Position=Vector2.new(bx,by)
+local hp=math.clamp(hm.Health/hm.MaxHealth,0,1)
+local hh=bh*hp
+e.H.Size=Vector2.new(barW,hh);e.H.Position=Vector2.new(bx,by+(bh-hh))
+if hp>0.5 then e.H.Color=Color3.new(0,1,0) elseif hp>0.2 then e.H.Color=Color3.new(1,0.5,0) else e.H.Color=Color3.new(1,0,0) end
+else e.B.Visible=false;e.G.Visible=false;e.H.Visible=false end
+else e.B.Visible=false;e.G.Visible=false;e.H.Visible=false end
+end
+end
+end
+end
+end)
